@@ -374,6 +374,240 @@ Prelude> 'x' ++ "foo"
     In the expression: 'x' ++ "foo"
     In an equation for `it': it = 'x' ++ "foo"
 ```
-首先，被告知“无法将预期类型[a0]与实际类型匹配Char”。这意味着某些东西应该具有列表类型，而实际上却具有type Char。什么事 下一行告诉：它的第一个参数有(++)误，即'x'。接下来的几行继续为提供了更多背景信息。现在可以看到问题所在：正如第一行所说，显然'x'具有type Char。为什么会期望具有列表类型？好吧，因为它用作的参数(++)，该参数将列表作为第一个参数。
+首先，被告知“无法将预期类型`[a0]`与实际类型匹配Char”。这意味着某些东西应该具有列表类型，而实际上却具有type Char。什么事 下一行告诉：它的第一个参数有(++)误，即'x'。接下来的几行继续为提供了更多背景信息。现在可以看到问题所在：正如第一行所说，显然'x'具有type Char。为什么会期望具有列表类型？好吧，因为它用作的参数(++)，该参数将列表作为第一个参数。
 
 当收到大量错误消息时，请抵制最初的冲动以逃避；深吸一口气；并仔细阅读。不一定会理解整个事情，但是可能会学到很多东西，并且可能仅会获得足够的信息来找出问题所在。
+
+## Haskell 枚举类型
+
+Haskell允许程序员创建自己的枚举类型。这是一个简单的示例：
+
+```hs
+data Thing = Shoe 
+           | Ship 
+           | SealingWax 
+           | Cabbage 
+           | King
+  deriving Show
+```
+
+此声明新的类型，称为Thing具有五个数据构造 Shoe，Ship等，这些类型的（仅）值Thing。（这deriving Show是一个神奇的咒语，它告诉GHC自动生成用于将Things 转换为Strings的默认代码。这是ghci在打印type表达式的值时使用的Thing。）
+
+```hs
+shoe :: Thing
+shoe = Shoe
+
+listO'Things :: [Thing]
+listO'Things = [Shoe, SealingWax, King, Cabbage, King]
+```
+
+可以Thing通过模式匹配在s 上编写函数。
+
+```hs
+isSmall :: Thing -> Bool
+isSmall Shoe       = True
+isSmall Ship       = False
+isSmall SealingWax = True
+isSmall Cabbage    = True
+isSmall King       = False
+```
+
+回顾函数子句如何按从上到下的顺序进行尝试，还可以使定义isSmall简短一些，如下所示：
+
+```hs
+isSmall2 :: Thing -> Bool
+isSmall2 Ship = False
+isSmall2 King = False
+isSmall2 _    = True
+```
+
+## Haskell 扩展枚举
+
+Thing是枚举类型，类似于其他语言（例如Java或C ++）提供的类型。但是，枚举实际上只是Haskell更通用的代数数据类型的特例。作为不只是枚举的数据类型的第一个示例，请考虑以下定义FailableDouble：
+
+```hs
+data FailableDouble = Failure
+                    | OK Double
+  deriving Show
+```
+
+这表示该FailableDouble类型具有两个数据构造函数。第一个Failure没有参数，因此Failure它本身就是type的值FailableDouble。第二个OK参数接受type的参数Double。因此OK本身不是类型的值FailableDouble; 需要给它一个Double。例如，OK 3.4是type的值FailableDouble。
+
+```hs
+ex01 = Failure
+ex02 = OK 3.4
+```
+
+```hs
+safeDiv :: Double -> Double -> FailableDouble
+safeDiv _ 0 = Failure
+safeDiv x y = OK (x / y)
+```
+
+模式匹配更多！请注意，在这种OK情况下，如何命名随Double其附带的。
+
+```hs
+failureToZero :: FailableDouble -> Double
+failureToZero Failure = 0
+failureToZero (OK d)  = d
+```
+
+数据构造函数可以有多个参数。
+
+```hs
+-- Store a person's name, age, and favourite Thing.
+data Person = Person String Int Thing
+  deriving Show
+
+brent :: Person
+brent = Person "Brent" 31 SealingWax
+
+stan :: Person
+stan  = Person "Stan" 94 Cabbage
+
+getAge :: Person -> Int
+getAge (Person _ a _) = a
+```
+
+类型构造函数和数据构造函数都是如何命名的Person，但是它们使用不同的名称空间，并且是不同的东西。这种习惯用法（给一个构造函数类型的类型和数据构造函数赋予相同的名称）是很常见的，但是在习惯之前会造成混淆。
+
+### 一般的代数数据类型
+
+代数数据类型具有一个或多个数据构造函数，每个数据构造函数可以具有零个或多个参数。
+
+```hs
+data AlgDataType = Constr1 Type11 Type12
+                 | Constr2 Type21
+                 | Constr3 Type31 Type32 Type33
+                 | Constr4
+```
+
+这指定类型的值AlgDataType可以以四种方式之一来构造：使用Constr1，Constr2，Constr3，或Constr4。根据所使用的构造函数，一个AlgDataType值可能包含其他一些值。例如，如果使用构造它Constr1，则它带有两个值，一个是type Type11，另一个是type Type12。
+
+**类型和数据构造函数名称必须始终以大写字母开头**；变量（包括函数名称）必须始终以小写字母开头。（否则，Haskell解析器将很难确定哪个名称表示变量，哪个名称表示构造函数）。
+
+## Haskell 模式匹配
+
+从根本上讲，模式匹配是通过找出构建它的构造函数来分解一个值。这些信息可以用作决定做什么的基础-实际上，在Haskell中，这是做出决定的唯一方法。
+
+要决定如何处理type值AlgDataType（在上一节中定义的虚构类型），我们可以编写r类似
+
+```hs
+foo (Constr1 a b)   = ...
+foo (Constr2 a)     = ...
+foo (Constr3 a b c) = ...
+foo Constr4         = ...
+```
+
+*注意，在不仅仅是一个构造函数的模式周围需要括号。*
+
+* 下划线_可以用作匹配任何内容的“通配符模式”。
+* 表单的模式`x@pat`可用于将值与模式进行匹配`pat`，但也x可为整个要匹配的值指定名称。例如：
+
+```hs
+baz :: Person -> String
+baz p@(Person n _ _) = "The name field of (" ++ show p ++ ") is " ++ n
+*Main> baz brent
+"The name field of (Person \"Brent\" 31 SealingWax) is Brent"
+```
+
+* 模式可以嵌套。例如：
+
+```hs
+checkFav :: Person -> String
+checkFav (Person n _ SealingWax) = n ++ ", you're my kind of person!"
+checkFav (Person n _ _)          = n ++ ", your favorite thing is lame."
+*Main> checkFav brent
+"Brent, you're my kind of person!"
+*Main> checkFav stan
+"Stan, your favorite thing is lame."
+```
+
+请注意如何将模式嵌套在的模式SealingWax内Person。
+
+以下语法定义了可以用作模式的内容：
+
+```rs
+pat ::= _
+     |  var
+     |  var @ ( pat )
+     |  ( Constructor pat1 pat2 ... patn )
+```
+
+第一行说下划线是一种模式。第二行说一个变量本身就是一个模式：这种模式匹配任何东西，并将给定的变量名“绑定”到匹配的值。第三行指定@-patterns。最后一行说，构造函数名称后跟一系列模式本身就是一个模式：如果该模式是使用给定构造函数构造的，则该模式会与该值匹配，并且 pat1通过patn递归方式与该构造函数所包含的所有值进行匹配。
+
+实际上，模式的完整语法仍然包含更多功能，但是其余的功能暂时将我们带到了很远的地方。
+
+请注意，像2或一样的文字值'c'可以认为是没有参数的构造函数。就像类型Int和Char定义一样
+
+```hs
+data Int  = 0 | 1 | -1 | 2 | -2 | ...
+data Char = 'a' | 'b' | 'c' | ...
+```
+
+这意味着可以对文字值进行模式匹配。（当然，Int并且实际上Char不是通过这种方式定义的。）
+
+在Haskell中进行模式匹配的基本结构是case表达式。通常，case表达式看起来像
+
+```hs
+case exp of
+  pat1 -> exp1
+  pat2 -> exp2
+  ...
+```
+
+当评估时，表达exp被针对每个图案的匹配pat1，pat2...反过来。选择第一个匹配模式，然后整个case表达式计算为与匹配模式相对应的表达式。例如，
+
+```hs
+ex03 = case "Hello" of
+           []      -> 3
+           ('H':s) -> length s
+           _       -> 7
+```
+
+计算结果为4（选择了第二个模式；当然，第三个模式也匹配，但从未达到）。
+
+实际上，看到的用于定义函数的语法实际上只是用于定义case表达式的方便语法。
+例如，failureToZero先前给定的定义可以等效地写为
+
+```
+failureToZero' :: FailableDouble -> Double
+failureToZero' x = case x of
+                     Failure -> 0
+                     OK d    -> d
+```
+
+## 递归数据类型
+
+数据类型可以是递归的，即根据自身定义。实际上，我们已经看到了递归类型-列表的类型。列表为空，或者为单个元素，后跟剩余列表。我们可以这样定义自己的列表类型：
+
+```
+data IntList = Empty | Cons Int IntList
+```
+
+Haskell自己的内置列表非常相似。他们只是使用特殊的内置语法（[]和:）。
+（当然，它们也适用于任何类型的元素，而不仅仅是Ints；）
+
+经常使用递归函数来处理递归数据类型：
+
+```hs
+intListProd :: IntList -> Int
+intListProd Empty      = 1
+intListProd (Cons x l) = x * intListProd l
+```
+
+作为另一个简单的示例，可以定义一种二叉树的类型，
+其Int值存储在每个内部节点上，并且Char存储在每个叶上：
+
+```hs
+data Tree = Leaf Char
+          | Node Tree Int Tree
+  deriving Show
+```
+
+```hs
+tree :: Tree
+tree = Node (Leaf 'x') 1 (Node (Leaf 'y') 2 (Leaf 'z'))
+```
+
+
