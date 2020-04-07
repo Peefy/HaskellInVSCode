@@ -490,7 +490,7 @@ data AlgDataType = Constr1 Type11 Type12
 
 从根本上讲，模式匹配是通过找出构建它的构造函数来分解一个值。这些信息可以用作决定做什么的基础-实际上，在Haskell中，这是做出决定的唯一方法。
 
-要决定如何处理type值AlgDataType（在上一节中定义的虚构类型），我们可以编写r类似
+要决定如何处理type值AlgDataType（在上一节中定义的虚构类型），可以编写r类似
 
 ```hs
 foo (Constr1 a b)   = ...
@@ -536,7 +536,7 @@ pat ::= _
 
 第一行说下划线是一种模式。第二行说一个变量本身就是一个模式：这种模式匹配任何东西，并将给定的变量名“绑定”到匹配的值。第三行指定@-patterns。最后一行说，构造函数名称后跟一系列模式本身就是一个模式：如果该模式是使用给定构造函数构造的，则该模式会与该值匹配，并且 pat1通过patn递归方式与该构造函数所包含的所有值进行匹配。
 
-实际上，模式的完整语法仍然包含更多功能，但是其余的功能暂时将我们带到了很远的地方。
+实际上，模式的完整语法仍然包含更多功能，但是其余的功能暂时将带到了很远的地方。
 
 请注意，像2或一样的文字值'c'可以认为是没有参数的构造函数。就像类型Int和Char定义一样
 
@@ -579,7 +579,7 @@ failureToZero' x = case x of
 
 ## 递归数据类型
 
-数据类型可以是递归的，即根据自身定义。实际上，我们已经看到了递归类型-列表的类型。列表为空，或者为单个元素，后跟剩余列表。我们可以这样定义自己的列表类型：
+数据类型可以是递归的，即根据自身定义。实际上，已经看到了递归类型-列表的类型。列表为空，或者为单个元素，后跟剩余列表。可以这样定义自己的列表类型：
 
 ```
 data IntList = Empty | Cons Int IntList
@@ -610,4 +610,200 @@ tree :: Tree
 tree = Node (Leaf 'x') 1 (Node (Leaf 'y') 2 (Leaf 'z'))
 ```
 
+## Haskell 递归模式，多态性
 
+尽管递归函数在理论上可以做很多事情，但实际上，某些通用模式会一遍又一遍地出现。通过将这些模式抽象到库函数中，程序员可以保留对这些函数进行递归的底层细节，而在更高层次上思考问题，这是全程编程的目标。
+
+```hs
+data IntList = Empty | Cons Int IntList
+  deriving Show
+```
+
+可能会对IntList作的处理：
+
+* 对列表的每个元素执行一些操作
+* 根据测试，仅保留列表中的某些元素，并丢弃其他元素
+* 以某种方式“汇总”列表中的元素（找到它们的总和，乘积，最大值…）。
+
+例如可以向列表中的每个元素添加一个元素：
+
+或者可以通过采用绝对值来确保列表中的每个元素都是非负的：
+
+```hs
+absAll :: IntList -> IntList
+absAll Empty       = Empty
+absAll (Cons x xs) = Cons (abs x) (absAll xs)
+```
+
+或者可以对每个元素求平方：
+
+```hs
+squareAll :: IntList -> IntList
+squareAll Empty       = Empty
+squareAll (Cons x xs) = Cons (x*x) (squareAll xs)
+```
+
+确实有一种方法-您能解决吗？这三个示例中哪些部分相同，哪些部分发生变化？
+
+当然，改变的是要对列表的每个元素执行的操作。可以将此操作指定为type 的函数Int -> Int。在这里，开始看到能够将功能作为输入传递给其他功能有多么巨大的用处！
+
+现在，可以使用，和mapIntList实现：addOneToAllabsAllsquareAll
+
+```rs
+exampleList = Cons (-1) (Cons 2 (Cons (-6) Empty))
+
+addOne x = x + 1
+square x = x * x
+mapIntList addOne exampleList
+mapIntList abs    exampleList
+mapIntList square exampleList
+```
+
+另一个常见的模式是，只想基于测试保留列表中的某些元素，而丢弃其他元素。例如，只保留正数或偶数：
+
+```hs
+keepOnlyEven :: IntList -> IntList
+keepOnlyEven Empty = Empty
+keepOnlyEven (Cons x xs)
+  | even x    = Cons x (keepOnlyEven xs)
+  | otherwise = keepOnlyEven xs
+```
+
+## Haskell 多态性
+
+已经编写了一些不错的通用函数来映射和过滤Ints 列表。但是还没有完成概括！如果想过滤Integers的列表怎么办？或Bools？还是Strings 栈树列表的列表？对于每种情况，都必须创建一个新的数据类型和一个新的函数。更糟糕的是，代码将完全相同。唯一不同的是类型签名。Haskell不能在这里帮助吗？
+
+当然可以！Haskell支持数据类型和函数的多态性。“多态”一词来自希腊语（πολύμορφος），意思是“具有多种形式”：多态的东西适用于多种类型。
+
+### 多态数据类型
+
+如何声明一个多态数据类型。
+
+```hs
+data List t = E | C t (List t)
+```
+
+之前data IntList = ...，有data List t = ...The t是一个类型变量，可以代表任何类型。（类型变量必须以小写字母开头，而类型必须以大写字母开头。）data List t = ...表示List类型是由类型参数化的，与函数可以由某些输入参数化的方式几乎相同。
+
+给定类型t，a (List t)由构造器E或构造器C以及type值t和another组成(List t)。例子如下：
+
+```rs
+lst1 :: List Int
+lst1 = C 3 (C 5 (C 2 E))
+
+lst2 :: List Char
+lst2 = C 'x' (C 'y' (C 'z' E))
+
+lst3 :: List Bool
+lst3 = C True (C False E)
+```
+
+### 多态函数
+
+概括一下filterIntList的新多态Lists。可以只取码filterIntList并更换Empty由E并且Cons通过C：
+
+```hs
+filterList _ E = E
+filterList p (C x xs)
+  | p x       = C x (filterList p xs)
+  | otherwise = filterList p xs
+```
+
+什么是类型filterList？看看ghci的类型推断：
+
+```hs
+*Main> :t filterList
+filterList :: (t -> Bool) -> List t -> List t    
+```
+
+可以将其理解为：“对于任何类型t，filterList从tto中获取一个函数Bool，并包含一个t'的列表，并返回一个t'的列表。”
+
+泛化mapIntList呢？应该赋予函数一个什么类型的函数以将函数mapList应用于a中的每个元素List t？
+
+第一个想法可能是给它一个类型
+
+```hs
+mapList :: (t -> t) -> List t -> List t
+```
+
+这行得通，但是这意味着在应用时mapList，总是会得到一个列表，其元素类型与开始时的列表相同。这过于严格：希望能够执行类似的操作mapList show，例如将Ints 列表转换为s列表String。那么，这里是，实现的最通用类型mapList：
+```hs
+mapList :: (a -> b) -> List a -> List b
+mapList _ E        = E
+mapList f (C x xs) = C (f x) (mapList f xs)
+```
+关于多态函数要记住的一件事是，调用者可以选择类型。编写多态函数时，它必须适用于每种可能的输入类型。再加上Haskell无法直接根据某物是什么类型做出决策的事实，这具有一些有趣的含义，将在后面进行探讨。
+
+该Prelude是一堆的标准定义是被隐式地导入每一个Haskell程序的模块。值得花一些时间浏览其文档以熟悉可用的工具。
+
+当然，在中定义了多态列表Prelude，以及用于处理它们的许多有用的多态函数。例如，filter和map是filterList和的对应对象mapList。实际上，该Data.List模块仍然包含更多列表函数。
+
+另一个有用的多态类型是Maybe，定义为
+```hs
+data Maybe a = Nothing | Just a
+```
+类型Maybe a的值要么包含类型的值a（包装在Just构造函数中），要么包含Nothing（表示某种故障或错误）。该Data.Maybe模块具有处理Maybe值的功能。
+
+考虑以下多态类型：
+
+```
+[a] -> a
+```
+
+哪些功能可以具有这种类型？类型表示给定类型的事物列表a，函数必须产生一些类型的值a。例如，Prelude函数head具有这种类型。
+
+…但是如果head输入一个空列表怎么办？让我们来看看源代码，为head...
+
+它崩溃了！由于它必须适用于所有类型，因此它可能无能为力。没有办法凭空组成任意类型的元素。
+
+head这就是所谓的局部函数：某些输入head会崩溃。具有某些输入将使它们无限递归的函数也称为局部函数。在所有可能的输入上定义明确的功能称为总功能。
+
+Haskell的最佳实践是尽可能避免局部函数。实际上，在任何编程语言中，避免使用局部函数都是一种好习惯，但是在大多数情况下，这是令人讨厌的。Haskell倾向于使其变得非常容易和明智。
+
+head是个错误！它不应该在中Prelude。其他部分Prelude，你几乎从来不应该使用的功能包括tail，init，last，和(!!)。从这一点开始，在作业中使用以下功能之一将失去样式得分！
+
+通常，局部函数（如head，tail等等）可以由模式匹配代替。请考虑以下两个定义：
+
+```hs
+doStuff1 :: [Int] -> Int
+doStuff1 []  = 0
+doStuff1 [_] = 0
+doStuff1 xs  = head xs + (head (tail xs)) 
+doStuff2 :: [Int] -> Int
+doStuff2 []        = 0
+doStuff2 [_]       = 0
+doStuff2 (x1:x2:_) = x1 + x2
+```
+
+这些函数计算出的结果完全相同，并且它们都是合计的。但是显然只有第二个是全部，并且无论如何都更容易阅读。
+
+如果发现自己编写了局部函数怎么办？有两种方法。首先是更改函数的输出类型以指示可能的故障。回顾以下的定义Maybe：
+
+```hs
+data Maybe a = Nothing | Just a
+```
+
+可以按照如下的方式安全地重写它：
+
+```hs
+safeHead :: [a] -> Maybe a
+safeHead []    = Nothing
+safeHead (x:_) = Just x
+```
+
+```hs
+data NonEmptyList a = NEL a [a]
+
+nelToList :: NonEmptyList a -> [a]
+nelToList (NEL x xs) = x:xs
+
+listToNel :: [a] -> Maybe (NonEmptyList a)
+listToNel []     = Nothing
+listToNel (x:xs) = Just $ NEL x xs
+
+headNEL :: NonEmptyList a -> a
+headNEL (NEL a _) = a
+
+tailNEL :: NonEmptyList a -> [a]
+tailNEL (NEL _ as) = as
+```
