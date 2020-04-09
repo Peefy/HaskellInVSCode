@@ -1030,3 +1030,238 @@ foldr f z [a,b,c] == a `f` (b `f` (c `f` z))
 foldl f z [a,b,c] == ((z `f` a) `f` b) `f` c
 ```
 但是，一般而言，应该改用foldl'fromData.List，它的作用与之相同，foldl但效率更高。
+
+## Hashell 更多种类的多态和类型类
+
+Haskell特殊的多态被称为参数多态。本质上，这意味着多态函数必须对任何输入类型均一地工作。事实证明，这对于程序员和多态函数用户都具有一些有趣的含义。
+
+### 参数化
+
+考虑类型
+```hs
+a -> a -> a
+```
+请记住，a是一个类型变量，可以代表任何类型。这种类型的功能有哪些？
+
+那这个呢：
+
+f :: a -> a -> a
+f x y = x && y
+事实证明这是行不通的。该语法至少有效，但不进行检查。特别是，我们收到以下错误消息：
+
+2012-02-09.lhs:37:16:
+    Couldn't match type `a' with `Bool'
+      `a' is a rigid type variable bound by
+          the type signature for f :: a -> a -> a at 2012-02-09.lhs:37:3
+    In the second argument of `(&&)', namely `y'
+    In the expression: x && y
+    In an equation for `f': f x y = x && y
+这不起作用的原因是多态函数的调用者可以选择类型。在这里，我们（实现者）试图选择一种特定的类型（即Bool），但可能会给我们String，或Int，甚至是某人使用定义的某种类型f，而我们可能无法事先知道。换句话说，您可以阅读类型
+
+a -> a -> a
+作为承诺，与这种类型的功能将工作不管是什么类型的调用者进行选择。
+
+我们可以想象的另一个实现是
+
+f a1 a2 = case (typeOf a1) of
+            Int  -> a1 + a2
+            Bool -> a1 && a2
+            _    -> a1
+其中f某些类型的行为以某些特定方式表现。毕竟，我们当然可以在Java中实现它：
+
+class AdHoc {
+
+    public static Object f(Object a1, Object a2) {
+        if (a1 instanceof Integer && a2 instanceof Integer) {
+            return (Integer)a1 + (Integer)a2;
+        } else if (a1 instanceof Boolean && a2 instanceof Boolean) {
+            return (Boolean)a1 && (Boolean)a2;
+        } else {
+            return a1;
+        }
+    }
+
+    public static void main (String[] args) {
+        System.out.println(f(1,3));
+        System.out.println(f(true, false));
+        System.out.println(f("hello", "there"));
+    }
+
+}
+
+[byorgey@LVN513-9:~/tmp]$ javac Adhoc.java && java AdHoc
+4
+false
+hello
+但事实证明，无法用Haskell编写此代码。Haskell没有Java instanceof运算符之类的东西：不可能问什么是什么类型，并不能根据答案决定要做什么。原因之一是检查后，编译器将擦除 Haskell类型：在运行时，没有类型信息可供查询！但是，正如我们将看到的，还有其他充分的理由。
+
+这种类型的多态被称为参数多态。我们说像这样的函数在类型中f :: a -> a -> a是参数化的a。在这里，“参数”只是“对于呼叫者选择的任何类型都可以统一工作”的奇特名词。在Java中，这种类型的多态性是由泛型提供的（您猜对了，它受Haskell的启发：Haskell的原始设计师之一Philip Wadler后来成为Java泛型开发的主要参与者之一）。
+
+那么，实际上什么功能可以具有这种类型？其实只有两个！
+
+f1 :: a -> a -> a
+f1 x y = x
+
+f2 :: a -> a -> a
+f2 x y = y
+因此，事实证明类型a -> a -> a确实告诉了我们很多东西。
+
+让我们玩参数化游戏！考虑以下每种多态类型。对于每种类型，确定该类型的功能可能具有的行为。
+
+a -> a
+a -> b
+a -> b -> a
+[a] -> [a]
+(b -> c) -> (a -> b) -> (a -> c)
+(a -> a) -> a -> a
+关于参数化的两种观点
+作为多态函数的实现者，尤其是如果您习惯于使用Java之类的结构的语言时instanceof，您可能会发现这些限制很烦人。“你是什么意思，我不允许做X吗？”
+
+但是，存在双重观点。作为多态函数的用户，参数性不对应于限制，而是对应于保证。通常，当这些工具为您提供有关它们的行为方式的有力保证时，它们的使用和推理就容易得多。参数化是仅查看Haskell函数类型可以告诉您有关函数的太多原因的一部分。
+
+好的，很好，但是有时候根据类型决定要做什么真的很有用！例如，加法呢？我们已经看到加法是多态的（例如，可在Int，Integer和上Double使用），但显然它必须知道要添加的数字类型才能决定要做什么：加两个Integers的方式与加法完全不同2 Double秒。那么它实际上是如何工作的呢？只是魔术吗？
+
+其实不是！实际上，我们可以使用Haskell根据类型决定要做什么，只是不像我们以前想象的那样。让我们先来看一下的类型(+)：
+
+Prelude> :t (+)
+(+) :: Num a => a -> a -> a
+嗯，Num a =>那边在做什么？实际上，(+)它并不是唯一一个带有有趣的双箭头类型的标准函数。以下是一些其他内容：
+
+(==) :: Eq a   => a -> a -> Bool
+(<)  :: Ord a  => a -> a -> Bool
+show :: Show a => a -> String
+那么这是怎么回事？
+
+类型类别
+Num，Eq，Ord，和Show是类型类，和我们说(==)，(<)和(+)有“型级多态”。直观地讲，类型类对应于为它们定义了某些操作的类型集，并且类型类多态函数仅适用于作为所讨论类型类实例的类型。作为示例，让我们详细研究Eq类型类。
+
+class Eq a where
+  (==) :: a -> a -> Bool
+  (/=) :: a -> a -> Bool
+我们可以这样阅读：Eq声明为带有单个参数的类型类a。任何a要成为的实例的类型都Eq必须定义两个函数，(==)并(/=)使用指定的类型签名。例如，要成为我们Int的实例，Eq我们必须定义(==) :: Int -> Int -> Bool和(/=) :: Int -> Int -> Bool。（当然，没有必要，因为标准的Prelude已经为我们定义了一个Int实例Eq。）
+
+让我们(==)再次看看类型：
+
+(==) :: Eq a => a -> a -> Bool
+在Eq a这到来之前的=>是一个类型类的约束。我们可以这样解读：对于任何类型a，只要a是Eq type 的实例，(==)都可以采用type的两个值a并返回a Bool。(==)在不是的实例的某种类型上调用函数是类型错误Eq。如果一个普通的多态类型是一个保证函数将适用于调用者选择的任何类型的承诺，则类型类多态函数是一个有限的保证，即该函数将适用于调用者选择的任何类型的只要该实例是一个实例。所需类型类别的。
+
+需要注意的重要一点是，当使用(==)（或任何类型类方法）时，编译器将根据其参数的推断类型使用类型推断来确定应选择哪种实现(==)。换句话说，这类似于在Java之类的语言中使用重载方法。
+
+为了更好地了解它在实际中的工作方式，让我们创建自己的类型并Eq为其声明一个实例。
+
+data Foo = F Int | G Char
+
+instance Eq Foo where
+  (F i1) == (F i2) = i1 == i2
+  (G c1) == (G c2) = c1 == c2
+  _ == _ = False
+
+  foo1 /= foo2 = not (foo1 == foo2)
+我们必须同时定义(==)和，这有点令人讨厌(/=)。实际上，类型类可以根据其他方法提供方法的默认实现，只要实例不使用其自身覆盖默认定义，就应使用该方法。因此我们可以想象这样声明Eq：
+
+class Eq a where
+  (==) :: a -> a -> Bool
+  (/=) :: a -> a -> Bool
+  x /= y = not (x == y)
+现在，任何声明Eqonly 实例的人都必须指定实现(==)，他们将(/=)免费获得。但是，如果由于某种原因他们想(/=)用自己的方法覆盖默认实现，那么他们也可以这样做。
+
+实际上，Eq该类实际上是这样声明的：
+
+class Eq a where
+  (==), (/=) :: a -> a -> Bool
+  x == y = not (x /= y)
+  x /= y = not (x == y)
+这意味着，当我们做的一个实例Eq，我们可以定义两种 (==)或(/=)，取其更方便; 另一项将根据我们指定的一项自动定义。（但是，我们必须要小心：如果不指定任何一个，我们将得到无限递归！）
+
+事实证明，Eq（以及其他一些标准类型类）很特殊：GHC能够自动Eq为我们生成的实例。像这样：
+
+data Foo' = F' Int | G' Char
+  deriving (Eq, Ord, Show)
+这告诉GHC的自动派生实例Eq，Ord以及Show类型类为我们的数据类型Foo。
+
+类型类和Java接口
+
+类型类与Java接口非常相似。两者都定义了一组实现特定操作列表的类型/类。但是，有几种重要的方式可以使类型类比Java接口更通用：
+
+定义Java类时，必须声明其实现的任何接口。另一方面，类型类实例是与相应类型的声明分开声明的，甚至可以放在单独的模块中。
+
+与为Java接口方法提供的签名相比，可以为类型类方法指定的类型更通用，更灵活，尤其是在多参数类型类输入图片时。例如，假设一个假设类型类
+
+class Blerg a b where
+  blerg :: a -> b -> Bool
+使用blerg达做多分派：其中实现blerg编译器应该选择取决于两种类型a和b。用Java没有简单的方法可以做到这一点。
+
+Haskell类型类也可以轻松地处理二进制（或三进制或…）方法，如
+
+class Num a where
+  (+) :: a -> a -> a
+  ...
+在Java中，没有很好的方法来执行此操作：一方面，两个参数之一必须是“特权”参数，实际上是要(+)在其上调用方法，并且这种不对称性很尴尬。此外，由于Java的子类型化，获取某个接口类型的两个参数并不能保证它们实际上是同一类型，这使得实现二进制运算符（例如(+)笨拙）（通常需要进行一些运行时类型检查）成为可能。
+
+标准类型类别
+
+这是您应该了解的其他一些标准类型类：
+
+Ord用于其元素可以完全排序的类型，即可以比较任何两个元素以查看哪个元素小于另一个元素。它提供了类似的比较操作(<)和(<=)，也是compare功能。
+
+Num用于“数字”类型，它支持加，减和乘积运算。要注意的一件事很重要，就是整数文字实际上是类型多态的类型：
+
+Prelude> :t 5
+5 :: Num a => a
+这意味着像这样的文字5可以用作Ints，Integers，Doubles或任何其他类型的类型，这些类型是Num（Rational，Complex Double甚至您定义的类型...）的实例。
+
+Show定义了方法show，该方法用于将值转换为Strings。
+
+阅读是的双重性Show。
+
+整数表示整数类型，例如Int和Integer。
+
+类型类示例
+
+作为创建自己的类型类的示例，请考虑以下内容：
+
+class Listable a where
+  toList :: a -> [Int]
+我们可以将其Listable视为可以转换为Ints 列表的事物类。看一下类型toList：
+
+toList :: Listable a => a -> [Int]
+让我们为创建一些实例Listable。首先，Int可以转换为[Int]只通过创建一个单列表，并且Bool同样可以转换，也就是说，通过翻译True来1和False到0：
+
+instance Listable Int where
+  -- toList :: Int -> [Int]
+  toList x = [x]
+
+instance Listable Bool where
+  toList True  = [1]
+  toList False = [0]
+我们无需做任何工作即可将的列表转换Int为的列表Int：
+
+instance Listable [Int] where
+  toList = id
+最后，这是一个二叉树类型，我们可以通过展平将其转换为列表：
+
+data Tree a = Empty | Node a (Tree a) (Tree a)
+
+instance Listable (Tree Int) where
+  toList Empty        = []
+  toList (Node x l r) = toList l ++ [x] ++ toList r
+如果我们根据实现其他功能toList，它们也会受到Listable约束。例如：
+
+-- to compute sumL, first convert to a list of Ints, then sum
+sumL x = sum (toList x)
+ghci通知我们类型sumL为
+
+sumL :: Listable a => a -> Int
+这很有意义：由于使用，因此sumL仅适用于作为实例的类型。这个如何？ListabletoList
+
+foo x y = sum (toList x) == sum (toList y) || x < y
+ghci告知我们的类型foo是
+
+foo :: (Listable a, Ord a) => a -> a -> Bool
+也就是说，foo对同时作为 Listable和的实例的类型进行处理Ord，因为它toList在参数上同时使用和比较。
+
+作为最后一个更复杂的示例，请考虑以下实例：
+
+instance (Listable a, Listable b) => Listable (a,b) where
+  toList (x,y) = toList x ++ toList y
+注意如何将类型类约束放在实例以及函数类型上。这表示对类型(a,b)是和都Listable一样长的实例。然后，我们可以在类型的值上以及在对的定义中使用。请注意，此定义不是递归的！的版本，我们正在定义是调用其他的版本，而不是自己。abtoListabtoListtoListtoList
