@@ -1514,3 +1514,212 @@ knapsack01 vs ws maxW = m!(numItems-1, maxW)
 
 example = knapsack01 [3,4,5,8,10] [2,3,4,5,9] 20
 ```
+
+## Hashell折叠和Monoids
+
+前面的章节中已经了解了如何为列表定义折叠功能，但是也可以将其推广到其他数据类型！
+
+考虑以下二进制树的数据类型，数据存储在内部节点中，而叶子结点的左右孩子都为Empty：
+```hs
+data Tree a = Empty
+            | Node (Tree a) a (Tree a)
+  deriving (Show, Eq)
+
+leaf :: a -> Tree a
+leaf x = Node Empty x Empty
+```
+
+编写一个函数来计算树的大小（即Node s 的数量）：
+```hs
+treeSize :: Tree a -> Integer
+treeSize Empty        = 0
+treeSize (Node l _ r) = 1 + treeSize l + treeSize r
+```
+
+树中的数据总和：
+
+```hs
+treeSum :: Tree Integer -> Integer
+treeSum Empty     = 0
+treeSum (Node l x r)  = x + treeSum l + treeSum r
+```
+
+树的深度：
+```hs
+treeDepth :: Tree a -> Integer
+treeDepth Empty        = 0
+treeDepth (Node l _ r) = 1 + max (treeDepth l) (treeDepth r)
+```
+
+将树的元素展平为列表：
+
+```hs
+flatten :: Tree a -> [a]
+flatten Empty        = []
+flatten (Node l x r) = flatten l ++ [x] ++ flatten r
+```
+
+开始看到任何模式了吗？以上每个功能：
+
+* 需要Tree作为输入
+* 输入上的模式匹配 Tree
+* 在Empty情况下，给出一个简单的答案
+* 在Node情况下：
+1. 在两个子树上递归调用自身
+2. 以某种方式将递归调用的结果与数据结合起来x以产生最终结果
+
+作为优秀的程序员，始终致力于抽象出重复的模式，对吗？因此，让概括一下。需要将上述示例的各个部分作为参数传递，这些示例因示例而异：
+
+1. 返回类型
+2. Empty案件的答案
+3. 如何合并递归调用
+
+将调用树中包含的数据a的类型以及结果的类型b。
+```hs
+treeFold :: b -> (b -> a -> b -> b) -> Tree a -> b
+treeFold e _ Empty        = e
+treeFold e f (Node l x r) = f (treeFold e f l) x (treeFold e f r)
+```
+
+现在应该能够定义更加简单的treeSize，treeSum以及其他的例子：
+
+
+```hs
+treeSize' :: Tree a -> Integer
+treeSize' = treeFold 0 (\l _ r -> 1 + l + r)
+
+treeSum' :: Tree Integer -> Integer
+treeSum' = treeFold 0 (\l x r -> l + x + r)
+
+treeDepth' :: Tree a -> Integer
+treeDepth' = treeFold 0 (\l _ r -> 1 + max l r)
+
+flatten' :: Tree a -> [a]
+flatten' = treeFold [] (\l x r -> l ++ [x] ++ r)
+```
+
+还可以轻松编写新的树折叠函数：
+```hs
+treeMax :: (Ord a, Bounded a) => Tree a -> a
+treeMax = treeFold minBound (\l x r -> l `max` x `max` r)
+```
+
+### 折叠式
+
+一个未折叠的例子：
+
+```hs
+data ExprT = Lit Integer
+           | Add ExprT ExprT
+           | Mul ExprT ExprT
+
+eval :: ExprT -> Integer
+eval (Lit i)     = i
+eval (Add e1 e2) = eval e1 + eval e2
+eval (Mul e1 e2) = eval e1 * eval e2
+```
+
+折叠后的形式：
+
+```hs
+exprTFold :: (Integer -> b) -> (b -> b -> b) -> (b -> b -> b) -> ExprT -> b
+exprTFold f _ _ (Lit i)     = f i
+exprTFold f g h (Add e1 e2) = g (exprTFold f g h e1) (exprTFold f g h e2)
+exprTFold f g h (Mul e1 e2) = h (exprTFold f g h e1) (exprTFold f g h e2)
+
+eval2 :: ExprT -> Integer
+eval2 = exprTFold id (+) (*)
+```
+
+现在可以轻松地执行其他操作，例如计算表达式中文字的数量：
+```hs
+numLiterals :: ExprT -> Int
+numLiterals = exprTFold (const 1) (+) (+)
+```
+
+要点是，可以为许多（尽管不是全部）数据类型实现折叠。`fold for T`将为每个T的构造函数使用一个（高阶）参数，编码如何将该构造函数存储的值转换为结果类型的值-假定的任何递归出现T都已被折叠为结果。可能要编写的许多函数T最终都可以用简单的折叠形式表示。
+
+### Monoids
+
+这是应该了解的另一个标准类型类，可在Data.Monoid模块中找到：
+```hs
+class Monoid m where
+    mempty  :: m
+    mappend :: m -> m -> m
+
+    mconcat :: [m] -> m
+    mconcat = foldr mappend mempty
+
+(<>) :: Monoid m => m -> m -> m
+(<>) = mappend
+```
+
+(<>)mappend仅仅因为写作mappend是乏味的，所以被定义为（自GHC 7.4.1起）的同义词。
+
+作为实例的类型Monoid具有一个称为的特殊元素mempty，以及一个二进制操作`mappend`（缩写为`(<>)`），该操作采用该类型的两个值并产生另一个值。目的是mempty作为<>和<>的关联。即，对于所有x，y和z，
+```hs
+mempty <> x == x
+x <> mempty == x
+(x <> y) <> z == x <> (y <> z)
+```
+
+关联法则意味着可以明确地写出
+
+```hs
+a <> b <> c <> d <> e
+```
+
+因为无论括号如何，都将得到相同的结果。
+
+还有mconcat，用于组合整个值列表。默认情况下，它是使用来实现的foldr，但是它包含在Monoid类中，因为的特定实例Monoid可能具有更有效的实现方法。
+
+Monoid一旦知道要寻找它们，它就会出现在任何地方。编写一些实例（仅用于实践；这些都在标准库中）。
+
+列表在串联下形成一个monoid：
+```hs
+instance Monoid [a] where
+  mempty  = []
+  mappend = (++)
+```
+ 
+正如上面所暗示的，加法在整数（或有理数或实数……）上定义了一个非常好的monoid。但是，乘法也是如此！该怎么办？不能将相同类型的两个不同实例赋予相同类型。相反，创建两个newtype，每个实例一个：
+```hs
+newtype Sum a = Sum a
+  deriving (Eq, Ord, Num, Show)
+
+getSum :: Sum a -> a
+getSum (Sum a) = a
+
+instance Num a => Monoid (Sum a) where
+  mempty  = Sum 0
+  mappend = (+)
+
+newtype Product a = Product a
+  deriving (Eq, Ord, Num, Show)
+
+getProduct :: Product a -> a
+getProduct (Product a) = a
+
+instance Num a => Monoid (Product a) where
+  mempty  = Product 1
+  mappend = (*)
+```
+
+请注意，要查找Integer使用的s 列表的乘积mconcat，必须首先将它们转换为type的值Product Integer：
+```hs
+lst :: [Integer]
+lst = [1,5,8,23,423,99]
+
+prod :: Integer
+prod = getProduct . mconcat . map Product $ lst
+```
+
+（当然，这个特定示例很愚蠢，因为可以改用标准product函数，但是这种模式确实很方便。）
+
+只要单个组件可以对，对就形成一个monoid：
+```hs
+instance (Monoid a, Monoid b) => Monoid (a,b) where
+  mempty = (mempty, mempty)
+  (a,b) `mappend` (c,d) = (a `mappend` c, b `mappend` d)
+```
+
