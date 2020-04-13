@@ -1836,3 +1836,151 @@ d { field3 = ... }
 foo (C { field1 = x }) = ... x ...
 ```
 这仅field1与D值中的字段匹配，然后调用它x（当然，x也可以放置任意模式），而忽略其他字段。
+
+## Hashell函子
+
+### 动机
+
+之前看到过许多旨在将函数“映射”到某种容器的每个元素上的函数。例如：
+
+```hs
+map :: (a -> b) -> [a] -> [b]
+
+treeMap :: (a -> b) -> Tree a -> Tree b
+```
+
+在作业5很多人最终做了类似的事情时，你必须以某种方式适用eval :: ExprT -> Int于Maybe ExprT为了得到一个Maybe Int。
+
+maybeEval :: (ExprT -> Int) -> Maybe ExprT -> Maybe Int
+
+maybeMap :: (a -> b) -> Maybe a -> Maybe b
+
+这里有一个重复的模式，作为优秀的Haskell程序员，我们想知道如何概括它！那么哪些部分在示例之间是相同的，哪些部分是不同的？
+
+当然，不同的部分是容器被“映射”：
+
+thingMap :: (a -> b) -> f a -> f b
+但是这些“容器”是什么东西？我们真的可以f给他们分配一个类型变量吗？
+
+简短的题外话
+正如每一个表达式都有一个类型，类型本身有“类”，叫种。（在您问：不，没有其他种类之前，没有其他层次了-至少在Haskell中没有。）在这里ghci我们可以使用询问类型的种类:kind。例如，让我们问一下Int：
+
+Prelude> :k Int
+Int :: *
+我们看到这Int很有帮助*。实际上，实际上可以用作某些值的类型的每种类型都具有kind *。
+
+Prelude> :k Bool
+Bool :: *
+Prelude> :k Char
+Char :: *
+Prelude> :k Maybe Int
+Maybe Int :: *
+如果Maybe Int有帮助*，那又怎么样Maybe呢？请注意，没有type的值Maybe。有类型Maybe Int和类型的值Maybe Bool，但没有类型的值Maybe。但Maybe肯定是有效的类似类型的事物。那是什么 它有什么种类？让我们问ghci：
+
+Prelude> :k Maybe
+Maybe :: * -> *
+ghci告诉我们Maybe有善良* -> *。Maybe从某种意义上说，它是类型上的函数 —我们通常将其称为类型构造函数。Maybe接受一种类型的输入类型*，产生另一种类型的类型*。例如，它可以作为输入Int :: *并产生新的type Maybe Int :: *。
+
+是否还有其他带有kind的类型构造函数* -> *？当然。例如，，Tree或列表类型构造函数，如[]。
+
+Prelude> :k []
+[] :: * -> *
+Prelude :k [] Int
+[] Int :: *
+Prelude> :k [Int]  -- special syntax for [] Int
+[Int] :: *
+Prelude> :k Tree
+Tree :: * -> *
+那么其他类型的构造函数呢？如何JoinList从作业7？
+
+data JoinList m a = Empty
+                  | Single m a
+                  | Append m (JoinList m a) (JoinList m a)
+Prelude> :k JoinList
+JoinList :: * -> * -> *
+这是有道理的：JoinList期望将两种类型用作参数，并为我们提供新的类型。（当然，它是咖喱状的，因此我们也可以将其视为一种类型并返回某种类型的东西* -> *。）这是另一种：
+
+Prelude> :k (->)
+(->) :: * -> * -> *
+这告诉我们函数类型构造函数带有两个类型参数。像任何运算符一样，我们使用它作为后缀：
+
+Prelude> :k Int -> Char
+Int -> Char :: *
+但是我们不必：
+
+Prelude> :k (->) Int Char
+(->) Int Char :: *
+好，那一个呢？
+
+data Funny f a = Funny a (f a)
+Prelude> :k Funny
+Funny :: (* -> *) -> * -> *
+Funny接受两个参数，第一个参数是kind的类型* -> *，第二个参数是kind的类型*，并构造一个类型。（GHCi是如何知道类型的Funny呢？好吧，它也进行类型推断，就像它也进行类型推断一样。）Funny是一个高阶类型构造函数，同样map是一个高阶函数。请注意，类型也可以像函数一样部分地应用：
+
+Prelude> :k Funny Maybe
+Funny Maybe :: * -> *
+Prelude> :k Funny Maybe Int
+Funny Maybe Int :: *
+函子
+我们看到的映射模式的本质是一个具有如下类型的高阶函数
+
+thingMap :: (a -> b) -> f a -> f b
+这里f是一个类型的变量在静置一段类型的一种* -> *。那么，我们可以一劳永逸地编写此类函数吗？
+
+thingMap :: (a -> b) -> f a -> f b
+thingMap h fa = ???
+好吧，不是真的。如果我们不知道是什么，我们将无能为力f。thingMap每个方面的工作方式都不一样f。解决方案是创建一个类型类，传统上称为Functor：
+
+class Functor f where
+  fmap :: (a -> b) -> f a -> f b
+（Functor在标准前奏定义。请注意，名为“仿”来自范畴论，是不是同样的事情，在C ++仿函数（本质上属于一类函数）。）现在，我们可以只实现在这个类每个具体的方式f。请注意，Functor该类抽象了kind类型* -> *。所以写没有意义
+
+instance Functor Int where
+  fmap = ...
+确实，如果我们尝试尝试，我们会得到一个非常好的种类不匹配错误：
+
+[1 of 1] Compiling Main             ( 09-functors.lhs, interpreted )
+
+09-functors.lhs:145:19:
+    Kind mis-match
+    The first argument of `Functor' should have kind `* -> *',
+    but `Int' has kind `*'
+    In the instance declaration for `Functor Int'
+如果我们了解种类，则此错误会告诉我们确切的问题是什么。
+
+但是，为Functor举例说明确实是有道理的Maybe。我们开始做吧。遵循类型使它变得微不足道：
+
+instance Functor Maybe where
+  fmap _ Nothing  = Nothing
+  fmap h (Just a) = Just (h a)
+列表呢？
+
+instance Functor [] where
+  fmap _ []     = []
+  fmap f (x:xs) = f x : fmap f xs
+  -- or just
+  -- fmap = map
+十分简单。那IO呢 创建Functorfor 的实例是否有意义IO？
+
+当然。fmap :: (a -> b) -> IO a -> IO b导致IO操作，该IO a操作先运行该操作，然后在返回结果之前应用该函数转换结果。我们可以轻松实现此目标：
+
+instance Functor IO where
+  fmap f ioa = ioa >>= (\a -> return (f a))
+甚至
+
+instance Functor IO where
+  fmap f ioa = ioa >>= (return . f)
+现在让我们尝试一些令人费解的事情：
+
+instance Functor ((->) e) where
+什么！？好吧，让我们遵循以下类型：如果f = (->) e那么我们想要
+
+fmap :: (a -> b) -> (->) e a -> (->) e b
+或者，带有(->)书面中缀：
+
+fmap :: (a -> b) -> (e -> a) -> (e -> b)
+嗯，这种类型的签名似乎很熟悉……
+
+instance Functor ((->) e) where
+  fmap = (.)
+疯！这是什么意思？好吧，一种考虑类型值的方法(e -> a)是将其作为一个“- e索引容器”，a每个的值都有一个e。要在此类容器中的每个值上映射一个函数，就完全对应于函数组成：要从转换后的容器中选择一个元素，我们首先应用该(e -> a)函数a从原始容器中选择一个，然后应用该(a -> b)函数来转换我们选择的元素。
