@@ -2009,3 +2009,400 @@ instance Functor ((->) e) where
   fmap = (.)
 ```
 这是什么意思？好吧，一种考虑类型值的方法`(e -> a)`是将其作为一个“- e索引容器”，a每个的值都有一个e。要在此类容器中的每个值上映射一个函数，就完全对应于函数组成：要从转换后的容器中选择一个元素，首先应用该`(e -> a)`函数a从原始容器中选择一个，然后应用该`(a -> b)`函数来转换选择的元素。
+
+## Hashell 适用函子
+
+动机
+考虑以下Employee类型：
+
+type Name = String
+
+data Employee = Employee { name    :: Name
+                         , phone   :: String }
+                deriving Show
+当然，Employee构造函数具有类型
+
+Employee :: Name -> String -> Employee
+也就是说，如果我们具有Name和String，则可以应用Employee构造函数来构建Employee对象。
+
+但是，假设我们没有a Name和a String；我们实际拥有的是一个Maybe Name和一个Maybe String。也许它们来自解析充满错误的某些文件，或者来自某些字段可能留为空白的形式，或者来自某种形式。我们不一定可以制作一个Employee。但是当然我们可以做一个Maybe Employee。也就是说，我们希望采用我们的(Name -> String -> Employee)功能并将其转换为(Maybe Name -> Maybe String -> Maybe Employee)功能。我们可以用这种类型写东西吗？
+
+(Name -> String -> Employee) ->
+(Maybe Name -> Maybe String -> Maybe Employee)
+当然可以，我完全相信您现在就可以在睡眠中写下它。我们可以想象它是如何工作的：如果名称或字符串是Nothing，我们就走Nothing了；如果两者都为Just，则Employee使用Employee构造函数（封装在中Just）得出一个构建体。但是，让我们继续前进...
+
+考虑一下：现在有a Name和a 而不是Stringa [Name]和a [String]。也许我们可以摆脱[Employee]困境？现在我们要
+
+(Name -> String -> Employee) ->
+([Name] -> [String] -> [Employee])
+我们可以想象两种不同的工作方式：我们可以将对应的Names和Strings 匹配为Employees；或者我们可以通过所有可能的方式将Names和Strings 配对。
+
+还是这样：我们有一个(e -> Name)和(e -> String)用于某种类型e。例如，也许e是一些巨大的数据结构，并且我们有一些函数告诉我们如何从中提取a Name和a String。我们可以将其制成一个(e -> Employee)，即Employee从相同结构中提取的方法吗？
+
+(Name -> String -> Employee) ->
+((e -> Name) -> (e -> String) -> (e -> Employee))
+没问题，这一次实际上只有一种编写此函数的方法。
+
+泛化
+既然我们已经看到了这种模式的用处，让我们概括一下。我们想要的函数类型实际上看起来像这样：
+
+(a -> b -> c) -> (f a -> f b -> f c)
+嗯，这看起来很熟悉……与的类型非常相似fmap！
+
+fmap :: (a -> b) -> (f a -> f b)
+唯一的区别是额外的论点。我们可以调用所需的函数fmap2，因为它需要两个参数的函数。也许我们可以写fmap2的方面fmap，所以我们只需要Functor对约束f：
+
+fmap2 :: Functor f => (a -> b -> c) -> (f a -> f b -> f c)
+fmap2 h fa fb = undefined
+尽力而为，但是Functor并不能给我们足够的执行力fmap2。怎么了？我们有
+
+h  :: a -> b -> c
+fa :: f a
+fb :: f b
+注意，我们也可以写成has 的类型a -> (b -> c)。因此，我们有一个带有的函数a，并且我们有一个类型的值f a…我们唯一能做的就是使用fmap将该函数移到上f，从而得到一个类型的结果：
+
+h         :: a -> (b -> c)
+fmap h    :: f a -> f (b -> c)
+fmap h fa :: f (b -> c)
+好，现在我们有了某种类型f (b -> c)和某种类型f b……，这就是我们被困住的地方！fmap不再有帮助。它为我们提供了一种将函数应用于Functor上下文中的值的方法，但是我们现在需要的是将自身在Functor上下文中的函数应用于上下文中的值Functor。
+
+适用性
+可能进行此类“上下文应用程序”的函子称为applicative，并且Applicative类（在中定义Control.Applicative）捕获了这种模式。
+
+class Functor f => Applicative f where
+  pure  :: a -> f a
+  (<*>) :: f (a -> b) -> f a -> f b
+该(<*>)运营商（通常发音为“AP”，简称“申请”）封装“上下文应用程序”的正是这个道理。还要注意的是，Applicative类需要它的实例是实例Functor为好，这样我们就可以随时使用fmap与实例Applicative。最后，请注意，Applicative还有另一种方法，pure它允许我们将类型的值注入a到容器中。现在，有趣的是，这fmap0将是pure：
+
+pure  :: a             -> f a
+fmap  :: (a -> b)      -> f a -> f b
+fmap2 :: (a -> b -> c) -> f a -> f b -> f c
+现在(<*>)，我们可以实现了fmap2，它在标准库中实际上称为liftA2：
+
+liftA2 :: Applicative f => (a -> b -> c) -> f a -> f b -> f c
+liftA2 h fa fb = (h `fmap` fa) <*> fb
+实际上，这种模式非常普遍，因此Control.Applicative定义(<$>)为的同义词fmap，
+
+(<$>) :: Functor f => (a -> b) -> f a -> f b
+(<$>) = fmap
+这样我们就可以写
+
+liftA2 h fa fb = h <$> fa <*> fb
+那liftA3呢
+
+liftA3 :: Applicative f => (a -> b -> c -> d) -> f a -> f b -> f c -> f d
+liftA3 h fa fb fc = ((h <$> fa) <*> fb) <*> fc
+（注意，优先级和的结合性(<$>)和(<*>)实际上以这样的方式，上述的所有的括号是不必要的定义）。
+
+好漂亮！与从fmap到liftA2（需要从Functor到泛化Applicative）的跳转不同，从liftA2到liftA3（从那里到liftA4…）跳转不需要任何额外的功能— Applicative足够。
+
+其实，当我们拥有所有的参数，像这样我们平时也懒得打电话liftA2，liftA3等，但只使用f <$> x <*> y <*> z <*> ...直接模式。（不过liftA2，朋友确实会派上用场进行部分应用。）
+
+但是呢pure？pure是我们想要的一些功能应用到论据一些仿函数的背景情况f，但是一个或多个自变量是不是在f-those参数是“纯粹的”，可以这么说。在申请之前，我们可以先将pure其提升为f第一个。像这样：
+
+liftX :: Applicative f => (a -> b -> c -> d) -> f a -> b -> f c -> f d
+liftX h fa b fc = h <$> fa <*> pure b <*> fc
+适用法律
+只有以下一项真正“有趣”的法则Applicative：
+
+f `fmap` x === pure f <*> x
+映射函数f在容器x应，得到相同的结果第一注入功能放入容器中，然后将其施加到x与(<*>)。
+
+还有其他法律，但它们没有启发性。如果您确实需要，可以自己阅读。
+
+适用实例
+也许
+
+让我们尝试以Applicative开头的一些实例Maybe。pure通过将值注入Just包装器来工作；(<*>)是可能失败的功能应用程序。结果是Nothing函数或其参数是否为。
+
+instance Applicative Maybe where
+  pure              = Just
+  Nothing <*> _     = Nothing
+  _ <*> Nothing     = Nothing
+  Just f <*> Just x = Just (f x)
+让我们来看一个例子：
+
+m_name1, m_name2 :: Maybe Name
+m_name1 = Nothing
+m_name2 = Just "Brent"
+
+m_phone1, m_phone2 :: Maybe String
+m_phone1 = Nothing
+m_phone2 = Just "555-1234"
+
+ex01 = Employee <$> m_name1 <*> m_phone1
+ex02 = Employee <$> m_name1 <*> m_phone2
+ex03 = Employee <$> m_name2 <*> m_phone1
+ex04 = Employee <$> m_name2 <*> m_phone2
+
+我们首先回顾Functor和Applicative类：
+
+class Functor f where
+  fmap :: (a -> b) -> f a -> f b
+
+class Functor f => Applicative f where
+  pure  :: a -> f a
+  (<*>) :: f (a -> b) -> f a -> f b
+每个Applicative也是一个-那么Functor我们可以fmap根据pure和实施(<*>)吗？咱们试试吧！
+
+fmap g x = pure g <*> x
+好吧，至少具有正确的类型！但是，不难想象对于某种类型的make Functor和Applicativeinstance使得这种相等性不成立。由于这将是一个相当可疑的情况，因此我们将平等性规定为一条法律，这是一种正式方法，表明给定类型的Functor和Applicative实例必须“很好地配合”。
+
+现在，让我们看看更多实例示例Applicative。
+
+更多应用示例
+清单
+
+Applicativefor列表的实例如何？实际上有两种可能的实例：一种将元素列表的函数列表和参数列表匹配（即，将它们“压缩”在一起），另一种实例以所有可能的方式组合函数和参数。
+
+首先，让我们编写执行所有可能组合的实例。（出于下周将变得清楚的原因，这是默认实例。）从这个角度来看，列表代表不确定性：也就是说，类型的值[a]可以被认为是具有多种可能性的单个值。然后(<*>)对应于不确定性函数应用程序，即，将不确定性函数应用于不确定性参数。
+
+instance Applicative [] where
+  pure a        = [a]          -- a "deterministic" value
+  [] <*> _      = []
+  (f:fs) <*> as = (map f as) ++ (fs <*> as)
+这是一个例子：
+
+names  = ["Joe", "Sara", "Mae"]
+phones = ["555-5555", "123-456-7890", "555-4321"]
+
+employees1 = Employee <$> names <*> phones
+也许这个特定的例子没有多大意义，但是不难想象您想以各种可能的方式组合事物的情况。例如，我们可以像这样进行非确定性算法：
+
+(.+) = liftA2 (+)    -- addition lifted to some Applicative context
+(.*) = liftA2 (*)    -- same for multiplication
+
+-- nondeterministic arithmetic
+n = ([4,5] .* pure 2) .+ [6,1] -- (either 4 or 5) times 2, plus either 6 or 1
+
+-- and some possibly-failing arithmetic too, just for fun
+m1 = (Just 3 .+ Just 5) .* Just 8
+m2 = (Just 3 .+ Nothing) .* Just 8
+接下来，让我们编写一个进行元素组合的实例。首先，我们必须回答一个重要的问题：我们应该如何处理不同长度的列表？一些想法表明，最明智的做法是将较长的列表截短为较短的列表，丢弃多余的元素。当然，还有其他可能的答案：例如，我们可以通过复制最后一个元素来扩展较短的列表（但是，当其中一个列表为空时，我们该怎么办？）；或使用“中性”元素扩展较短的列表（但随后我们将需要为的实例Monoid，或应用程序的额外“默认”参数）。
+
+该决定反过来决定了pure我们必须遵守法律的方式，因为我们必须遵守法律
+
+pure f <*> xs === f <$> xs
+请注意，右侧是长度与列表相同的列表xs，通过应用f到中的每个元素形成xs。我们可以使左侧结果相同的唯一方法是…… pure创建的无限多个副本f，因为我们事先不知道xs会持续多久。
+
+我们使用newtype包装器实现实例，以将其与其他列表实例区分开。标准的Prelude功能zipWith也很方便。
+
+newtype ZipList a = ZipList { getZipList :: [a] }
+  deriving (Eq, Show, Functor)
+
+instance Applicative ZipList where
+  pure = ZipList . repeat
+  ZipList fs <*> ZipList xs = ZipList (zipWith ($) fs xs)
+一个例子：
+
+employees2 = getZipList $ Employee <$> ZipList names <*> ZipList phones
+读者/环境
+
+让我们为做一个最后的示例实例(->) e。这被称为阅读器或适用于环境的应用程序，因为它允许从“环境”中“读取” e。实现实例并不难，我们只需要使用鼻子并遵循以下类型：
+
+instance Functor ((->) e) where
+  fmap = (.)
+
+instance Applicative ((->) e) where
+  pure = const
+  f <*> x = \e -> (f e) (x e)
+一个Employee例子：
+
+data BigRecord = BR { getName         :: Name
+                    , getSSN          :: String
+                    , getSalary       :: Integer
+                    , getPhone        :: String
+                    , getLicensePlate :: String
+                    , getNumSickDays  :: Int
+                    }
+
+r = BR "Brent" "XXX-XX-XXX4" 600000000 "555-1234" "JGX-55T3" 2
+
+getEmp :: BigRecord -> Employee
+getEmp = Employee <$> getName <*> getPhone
+
+ex01 = getEmp r
+撇开：抽象层次
+Functor是一个漂亮的工具，但相对简单。乍看之下，似乎Applicative并没有增加太多Functor，但事实证明，这只是一个很小的增加而产生的巨大影响。Applicative（我们将在下周看到Monad）应该被称为“计算模型”，而Functor事实并非如此。
+
+在处理诸如Applicative和时Monad，请务必记住涉及多个层次的抽象。粗略地说，抽象是一种隐藏了较低级别细节的东西，它提供了一个“高层”接口，可以（理想情况下）使用该接口而无需考虑较低级别—尽管较低级别的细节通常会“泄漏”在某些情况下。抽象层的想法很普遍。考虑一下用户程序-OS-内核-集成电路-门-硅或HTTP-TCP-IP-以太网，或编程语言-字节码-汇编-机器代码。如我们所见，Haskell为我们提供了许多不错的工具，可用于在Haskell程序本身中构造多层抽象，也就是说，我们可以向上动态扩展“编程语言”层堆栈。这是一个强大的功能，但可能导致混乱。必须学会明确地能够在多个层次上思考，并在各个层次之间进行切换。
+
+对于Applicative和Monad特别，只有两个层面去关注。第一个是实施各种水平Applicative和Monad实例，即 “原始的Haskell”电平。当您实现的Applicative实例时，您在以前的家庭作业中获得了有关此级别的经验Parser。
+
+一旦有了Applicative类型为的实例Parser，关键是我们可以使用接口 “向上移动层”并使用Parsers 进行Applicative编程，而无需考虑如何实际实现实例Parser及其Applicative实例的细节。您在上周的家庭作业中对此有了一点经验，并且本周将获得更多的经验。与实际实现实例相比，在此级别进行编程具有完全不同的感觉。让我们看一些例子。
+
+适用的API
+拥有统一接口的好处之一Applicative是我们可以编写适用于任何类型的通用工具和控制结构的实例Applicative。作为第一个示例，让我们尝试编写
+
+pair :: Applicative f => f a -> f b -> f (a,b)
+pair接受两个值并将它们配对，但是都在some的上下文中Applicative f。第一次尝试，我们可以使用一个函数来配对并使用(<$>)and 将其“提升”到参数上(<*>)：
+
+pair fa fb = (\x y -> (x,y)) <$> fa <*> fb
+尽管我们可以简化一点，但这是可行的。首先，请注意，Haskell允许使用特殊语法(,)来表示对构造函数，因此我们可以编写
+
+pair fa fb = (,) <$> fa <*> fb
+但是实际上，我们之前已经看过这种模式-这是使liftA2我们Applicative踏上整条路的模式。所以我们可以进一步简化为
+
+pair fa fb = liftA2 (,) fa fb
+但是现在无需显式写出函数参数，因此我们可以达到最终的简化版本：
+
+pair = liftA2 (,)
+现在，此功能有什么作用？当然，这取决于f所选的特定对象。让我们考虑一些特定的例子：
+
+f = Maybe：结果是Nothing两个参数中的任意一个为 如果两者都是Just结果就是Just他们的配对。
+f = []：pair计算两个列表的笛卡尔乘积。
+f = ZipList：pair与标准zip功能相同。
+f = IO：依次pair执行两个IO操作，并返回一对结果。
+f = Parser：pair依次运行两个解析器（解析器使用输入的连续部分），并成对返回其结果。如果任何一个解析器失败，则整个事情都会失败。
+可以实现以下功能吗？考虑一下f用上述每种类型替换时每个函数的功能。
+
+(*>)       :: Applicative f => f a -> f b -> f b
+mapA       :: Applicative f => (a -> f b) -> ([a] -> f [b])
+sequenceA  :: Applicative f => [f a] -> f [a]
+replicateA :: Applicative f => Int -> f a -> f [a]
+
+## Hashell 单子
+
+动机
+在过去的几周中，我们已经看到了Applicative该类如何使我们能够惯用地处理在某种“特殊上下文”中进行的计算-例如，考虑到可能出现的故障，带有的Maybe多个可能的输出[]，咨询了某种在环境中使用((->) e)，或在作业中使用“组合器”方法构造解析器。
+
+但是，到目前为止，我们只看到了具有固定结构的计算，例如将数据构造函数应用于固定的参数集。如果我们事先不知道计算的结构怎么办–也就是说，我们希望能够根据一些中间结果来决定要做什么？
+
+举个例子，Parser从家庭作业中回忆类型，并假设我们已经实现了它Functor和Applicative实例：
+
+newtype Parser a = Parser { runParser :: String -> Maybe (a, String) }
+instance Functor Parser where
+  ...
+
+instance Applicative Parser where
+  ...
+回想一下，type的值Parser a表示一个解析器，该解析器可以将a String作为输入并可能产生type值a，以及的其余未解析部分String。例如，整数的解析器，将字符串作为输入给出
+
+"143xkkj"
+可能会产生输出
+
+Just (143, "xkkj")
+如您在作业中所见，我们现在可以编写类似
+
+data Foo = Bar Int Int Char
+
+parseFoo :: Parser Foo
+parseFoo = Bar <$> parseInt <*> parseInt <*> parseChar
+假设我们有函数parseInt :: Parser Int和parseChar :: Parser Char。的Applicative实例自动处理可能失败（如果解析的任何组件失效，解析整个Foo将失败），并通过的未消耗部分螺纹String输入依次每个组件。
+
+但是，假设我们试图解析一个包含数字序列的文件，如下所示：
+
+4 78 19 3 44 3 1 7 5 2 3 2
+要注意的是，文件中的第一个数字告诉我们下一组“数字”的长度；组之后的下一个数字是下一组的长度，依此类推。因此，以上示例可以分为以下几类：
+
+78 19 3 44   -- first group
+1 7 5        -- second group
+3 2          -- third group
+这是一个有些人为的示例，但是实际上，许多“真实世界”文件格式遵循类似的原理，即您读取某种标头，然后告诉您随后几个块的长度，或者在哪里可以找到内容。文件等。
+
+我们想为此类型的文件格式编写一个解析器
+
+parseFile :: Parser [[Int]]
+不幸的是，仅使用Applicative接口是不可能的。问题在于，Applicative我们无法根据先前的结果来决定下一步该怎么做：在看到结果之前，我们必须预先决定要运行的解析操作。
+
+但是事实证明，Parser类型可以支持这种模式，该模式被抽象到Monad类型类中。
+
+单子
+该Monad类型类被定义为如下：
+
+class Monad m where
+  return :: a -> m a
+
+  (>>=) :: m a -> (a -> m b) -> m b
+
+  (>>)  :: m a -> m b -> m b
+  m1 >> m2 = m1 >>= \_ -> m2
+这看起来应该很熟悉！我们以前在的上下文中已经看到了这些方法IO，但是实际上它们并不是特定IO于所有的。IO事实证明，对Monadic的接口只是有用的。
+
+return也看起来很熟悉，因为它具有与相同的类型pure。实际上，每个Monad也都应该是Applicative带有的pure = return。我们两者都有的原因是已经存在了一段时间之后Applicative才发明的。 Monad
+
+(>>)只是的专用版本(>>=)（Monad如果某些实例想要提供更有效的实现，则将其包含在类中，但通常默认实现就可以了）。因此要了解它，我们首先需要了解(>>=)。
+
+实际上有第四种方法称为fail，但是将其放在Monad类中是一个错误，并且您永远不要使用它，因此我不会告诉您（如果您有兴趣，可以在Typeclassopedia中阅读它）。
+
+(>>=)（发音为“绑定”）是所有动作的所在！让我们仔细考虑一下它的类型：
+
+(>>=) :: m a -> (a -> m b) -> m b
+(>>=)有两个参数。第一个是type的值m a。（顺便说一句，此类值有时称为单子值或计算。还建议将它们称为Mobits。您不能称其为“ monads”，因为那是一种错误：类型构造函数m是monad 。）在任何情况下，想法都是类型的Mobit m a表示导致类型的值（或多个值，或者没有值）的计算a，并且还可能具有某种“效果”：
+
+c1 :: Maybe a是可能会失败但a会成功的计算。
+
+c2 :: [a]是导致（多个）as 的计算。
+
+c3 :: Parser a是隐式消耗a的一部分String并且（可能）产生a的计算a。
+
+c4 :: IO a是一种可能具有某些I / O效果的计算，然后生成一个a。
+
+等等。现在，第二个论点(>>=)呢？它是type 的函数(a -> m b)。也就是说，它是一个函数，它将根据第一个计算的结果选择要运行的下一个计算。这恰恰体现了Monad封装计算的能力，该计算可以根据先前的计算结果选择下一步做什么。
+
+因此，(>>=)真正要做的就是将两个移动点组合在一起以产生一个较大的移动点，然后先运行一个，然后再运行另一个，返回第二个的结果。最重要的转折是，我们要根据第一个输出的输出来决定运行哪个移动位。
+
+的默认实现(>>)现在应该有意义：
+
+(>>)  :: m a -> m b -> m b
+m1 >> m2 = m1 >>= \_ -> m2
+m1 >> m2简单地做m1，然后m2，忽视的结果m1。
+
+例子
+让我们从编写一个Monad实例开始Maybe：
+
+instance Monad Maybe where
+  return  = Just
+  Nothing >>= _ = Nothing
+  Just x  >>= k = k x
+return当然是Just。如果的第一个参数(>>=)是Nothing，则整个计算将失败；否则，如果为Just x，则应用第二个参数x来决定下一步要做什么。
+
+顺便提一句，k第二个参数通常使用字母，(>>=)因为k代表“继续”。我希望我在开玩笑。
+
+一些例子：
+
+check :: Int -> Maybe Int
+check n | n < 10    = Just n
+        | otherwise = Nothing
+
+halve :: Int -> Maybe Int
+halve n | even n    = Just $ n `div` 2
+        | otherwise = Nothing
+
+ex01 = return 7 >>= check >>= halve
+ex02 = return 12 >>= check >>= halve
+ex03 = return 12 >>= halve >>= check
+Monad列表构造函数的实例如何[]？
+
+instance Monad [] where
+  return x = [x]
+  xs >>= k = concat (map k xs)
+一个简单的例子：
+
+addOneOrTwo :: Int -> [Int]
+addOneOrTwo x = [x+1, x+2]
+
+ex04 = [10,20,30] >>= addOneOrTwo
+Monad组合器
+Monad该类的一个好处是，仅使用return，(>>=)我们可以构建许多不错的通用组合器，以便使用monad进行编程。让我们来看几个。
+
+首先，sequence获取一元数值列表，并产生一个用于收集结果的单价数值。这意味着什么取决于特定的单子。例如，在这种情况下，Maybe仅当所有单个计算都完成时，整个计算才成功；在这种情况下，IO意味着依次运行所有计算；在这种情况下，Parser这意味着在输入的顺序部分上运行所有解析器（并且只有在所有解析器都这样做的情况下才成功）。
+
+sequence :: Monad m => [m a] -> m [a]
+sequence [] = return []
+sequence (ma:mas) =
+  ma >>= \a ->
+  sequence mas >>= \as ->
+  return (a:as)
+使用sequence我们还可以编写其他组合器，例如
+
+replicateM :: Monad m => Int -> m a -> m [a]
+replicateM n m = sequence (replicate n m)
+现在我们终于可以编写我们要编写的解析器了：它很简单
+
+parseFile :: Parser [[Int]]
+parseFile = many parseLine
+
+parseLine :: Parser [Int]
+parseLine = parseInt >>= \i -> replicateM i parseInt
+（many也称为zeroOrMore作业）。
